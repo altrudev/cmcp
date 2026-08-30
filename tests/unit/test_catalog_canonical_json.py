@@ -62,6 +62,13 @@ def test_the_largest_exact_integer_is_accepted() -> None:
     assert canonical_json({"x": 2**53 - 1}) == b'{"x":9007199254740991}'
 
 
+def test_integer_is_admitted_but_float_equivalent_is_refused() -> None:
+    """The restricted binding domain must not collapse 1 and 1.0."""
+    assert canonical_json({"n": 1}) == b'{"n":1}'
+    with pytest.raises(CatalogApprovalError, match="floating point"):
+        canonical_json({"n": 1.0})
+
+
 def test_a_non_ascii_reviewer_identity_signs_and_verifies() -> None:
     key = Ed25519PrivateKey.generate()
     policy = {"policy_id": "politique-des-catalogues", "threshold": 1, "distinct_principals": True, "distinct_roles": False}
