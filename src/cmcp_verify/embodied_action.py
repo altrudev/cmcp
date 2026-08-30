@@ -60,8 +60,12 @@ class EmbodiedActionEvidenceResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def canonical_json_bytes(value: dict[str, Any]) -> bytes:
-    """Return the canonical JSON byte form used by cMCP evidence hashes."""
+def _legacy_embodied_json_bytes(value: dict[str, Any]) -> bytes:
+    """Return the v0 embodied-evidence sorted-key ASCII byte form.
+
+    This compatibility form is not RFC 8785/JCS and must not be reused for the
+    execution action/intent binding defined by #588.
+    """
 
     return json.dumps(
         value,
@@ -71,13 +75,19 @@ def canonical_json_bytes(value: dict[str, Any]) -> bytes:
     ).encode()
 
 
+def canonical_json_bytes(value: dict[str, Any]) -> bytes:
+    """Backward-compatible alias for the v0 embodied-evidence byte form."""
+
+    return _legacy_embodied_json_bytes(value)
+
+
 def hash_embodied_action_payload(payload: dict[str, Any], *, algorithm: str = "sha256") -> str:
     """Hash a detached embodied-action evidence payload."""
 
     if algorithm == "sha256":
-        digest = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        digest = hashlib.sha256(_legacy_embodied_json_bytes(payload)).hexdigest()
     elif algorithm == "sha384":
-        digest = hashlib.sha384(canonical_json_bytes(payload)).hexdigest()
+        digest = hashlib.sha384(_legacy_embodied_json_bytes(payload)).hexdigest()
     else:
         raise ValueError("algorithm must be sha256 or sha384")
     return f"{algorithm}:{digest}"
@@ -87,7 +97,7 @@ def compute_action_ref(payload: dict[str, Any]) -> str:
     """Compute the profile action_ref from the v0.1 canonical action preimage."""
 
     preimage = {field: payload[field] for field in _ACTION_REF_FIELDS}
-    return "sha256:" + hashlib.sha256(canonical_json_bytes(preimage)).hexdigest()
+    return "sha256:" + hashlib.sha256(_legacy_embodied_json_bytes(preimage)).hexdigest()
 
 
 def _claim_policy_hash(claim_json: dict[str, Any]) -> str | None:
