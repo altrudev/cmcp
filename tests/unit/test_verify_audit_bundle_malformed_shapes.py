@@ -29,7 +29,20 @@ selected = [
 ]
 assert len(selected) == 2
 namespace: dict[str, Any] = dict(vars(original))
-exec(compile(ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), *selected], type_ignores=[]), str(SOURCE), "exec"), namespace)
+compiled_module = ast.fix_missing_locations(
+    ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias(name="annotations")],
+                level=0,
+            ),
+            *selected,
+        ],
+        type_ignores=[],
+    )
+)
+exec(compile(compiled_module, str(SOURCE), "exec"), namespace)
 verify = namespace["verify_audit_bundle"]
 Result = original.AuditBundleResult
 
