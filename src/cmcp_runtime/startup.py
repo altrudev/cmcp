@@ -774,7 +774,27 @@ def run_startup(config_path: str) -> RuntimeContext:
         )
         sys.exit(1)
 
-    # Step 5f: kill switch blocks live beside the audit chain so they survive a
+    # Step 5f: the shared session-sensitivity ratchet is opt-in. When configured,
+    # startup must construct it here and carry it into RuntimeContext; validating
+    # the path without wiring the store leaves the documented cross-instance and
+    # restart guarantee silently inert. Fail closed if the configured store cannot
+    # be opened, because starting with process-local state would weaken the
+    # operator-selected boundary without saying so.
+    session_state_store: SqliteSessionStateStore | None = None
+    if config.session_state_path is not None:
+        try:
+            session_state_store = SqliteSessionStateStore(
+                _Path(config.session_state_path)
+            )
+        except Exception as exc:
+            _fatal(
+                "SESSION_STATE_STORE_UNAVAILABLE",
+                f"Cannot open session state store at '{config.session_state_path}': {exc}",
+                action="startup_aborted",
+            )
+            sys.exit(1)
+
+    # Step 5g: kill switch blocks live beside the audit chain so they survive a
     # restart. A gateway that cannot read its blocks cannot tell whether the
     # identity it is about to serve was stopped, so it does not start.
     kill_switch_store: KillSwitchBlockStore | None = None
@@ -798,6 +818,7 @@ def run_startup(config_path: str) -> RuntimeContext:
         catalog=catalog,
         catalog_scanner=catalog_scanner,
         audit_store=audit_store,
+        session_state_store=session_state_store,
         kill_switch_store=kill_switch_store,
         spiffe=spiffe_result,
         nras_appraisal=nras_appraisal,
