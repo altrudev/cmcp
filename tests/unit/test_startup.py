@@ -499,3 +499,41 @@ def test_valid_providers_matches_the_map_it_says_it_mirrors():
 
     mapped = frozenset(_PROVIDER_MAP)
     assert mapped == _VALID_PROVIDERS
+
+
+# ── #653: session-state store must be live after startup ──────────────────────
+
+def test_startup_constructs_configured_session_state_store(complete_setup):
+    config_path = Path(complete_setup)
+    state_path = config_path.parent / "session-state.db"
+    config_path.write_text(
+        config_path.read_text() + f"session_state_path: {state_path}\n"
+    )
+
+    ctx = run_startup(str(config_path))
+
+    from cmcp_runtime.session.store import SqliteSessionStateStore
+
+    assert isinstance(ctx.session_state_store, SqliteSessionStateStore)
+    assert state_path.exists()
+
+
+def test_startup_leaves_session_state_store_unset_by_default(complete_setup):
+    ctx = run_startup(complete_setup)
+    assert ctx.config.session_state_path is None
+    assert ctx.session_state_store is None
+
+
+def test_startup_fails_closed_when_configured_session_state_store_cannot_open(
+    complete_setup,
+):
+    config_path = Path(complete_setup)
+    state_path = config_path.parent / "missing-parent" / "session-state.db"
+    config_path.write_text(
+        config_path.read_text() + f"session_state_path: {state_path}\n"
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(str(config_path))
+
+    assert exc_info.value.code == 1
