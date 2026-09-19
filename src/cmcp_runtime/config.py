@@ -170,6 +170,7 @@ _KNOWN_TOP_KEYS = {
     "max_response_size_bytes",
     "policy_reload_interval_seconds",
     "audit_db_path",
+    "session_state_path",
     "conformance_profile",
 }
 
@@ -491,6 +492,8 @@ def load_config(path: str) -> Config:
     audit_db_path = raw.get("audit_db_path", "audit.db")
     session_state_path = raw.get("session_state_path") or None
     if session_state_path is not None:
+        if not isinstance(session_state_path, str):
+            raise ConfigError("session_state_path must be a string")
         _check_no_traversal("session_state_path", session_state_path)
     _check_no_traversal("policy_bundle_path", policy_bundle_path)
     _check_no_traversal("catalog_path", catalog_path)
