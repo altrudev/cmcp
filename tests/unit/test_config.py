@@ -478,3 +478,23 @@ def test_operator_token_equal_to_bearer_token_is_refused(config_file, monkeypatc
 
     with pytest.raises(ConfigError, match="must differ from CMCP_BEARER_TOKEN"):
         load_config(config_file(""))
+
+
+# ── #653: shared session-state store configuration ────────────────────────────
+
+def test_session_state_path_is_accepted(config_file):
+    path = config_file("session_state_path: /var/lib/cmcp/session-state.db\n")
+    cfg = load_config(path)
+    assert cfg.session_state_path == "/var/lib/cmcp/session-state.db"
+
+
+def test_session_state_path_traversal_rejected(config_file):
+    path = config_file("session_state_path: /var/lib/cmcp/../escape.db\n")
+    with pytest.raises(ConfigError, match=r"\.\."):
+        load_config(path)
+
+
+def test_session_state_path_non_string_rejected(config_file):
+    path = config_file("session_state_path: 123\n")
+    with pytest.raises(ConfigError, match="session_state_path must be a string"):
+        load_config(path)
