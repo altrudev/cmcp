@@ -747,13 +747,41 @@ def run_startup(config_path: str) -> RuntimeContext:
                     "agent_manifest.revocation_list_path is not set: Agent Manifest "
                     "revocation is not checked for this gateway"
                 )
+            from cmcp_runtime.catalog.authority_bridge import catalog_merkle_root, catalog_merkle_tools, verify_bridge
+            from cmcp_runtime.agent_manifest import signing_pre_image
+            import hashlib
+            import json
+            from pathlib import Path
+            bridge_path = config.agent_manifest.catalog_bridge_path
+            bridge_key_path = config.agent_manifest.catalog_bridge_trust_anchor_path
+            if not bridge_path or not bridge_key_path:
+                raise ConfigError("Agent Manifest catalog authority bridge is required")
+            declared_tools = loaded.manifest["artifacts"]["tool_manifest"]["tools"]
+            measured_tools = catalog_merkle_tools(catalog)
+            if declared_tools != measured_tools:
+                raise ConfigError("Agent Manifest tools differ from approved cMCP catalog")
+            merkle_root = catalog_merkle_root(catalog)
+            if loaded.manifest["artifacts"]["tool_manifest"]["catalog_hash"] != merkle_root:
+                raise ConfigError("Agent Manifest Merkle root differs from approved catalog")
+            try:
+                receipt = json.loads(Path(bridge_path).read_text())
+            except (OSError, ValueError) as exc:
+                raise ConfigError("Catalog authority bridge unreadable") from exc
+            bridge_keys = load_agent_manifest_trust_anchor(bridge_key_path)
+            manifest_digest = "sha256:" + hashlib.sha256(
+                loaded.envelope if loaded.envelope is not None else signing_pre_image(loaded.manifest)
+            ).hexdigest()
+            verify_bridge(receipt, bridge_keys,
+                manifest_id=loaded.manifest["manifest_id"], manifest_digest=manifest_digest,
+                agent_id=loaded.manifest["agent_id"], policy_hash=policy_bundle.bundle_hash,
+                runtime_catalog_hash=catalog.catalog_hash, manifest_catalog_root=merkle_root)
             agent_manifest = verify_agent_manifest_binding(
                 loaded.manifest,
                 trusted_keys,
                 envelope=loaded.envelope,
                 authenticated_subject=config.agent_manifest.authenticated_subject,
                 policy_bundle_hash=policy_bundle.bundle_hash,
-                tool_catalog_hash=catalog.catalog_hash,
+                tool_catalog_hash=merkle_root,
                 enforcement_mode=config.attestation.enforcement_mode,
                 allow_dev_subject_from_manifest=config.dev_mode,
                 revocations=revocations,

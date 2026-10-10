@@ -57,6 +57,7 @@ def _write_agent_manifest_files(
     *,
     policy_hash: str,
     catalog_hash: str,
+    tools: list | None = None,
 ) -> tuple[Path, Path]:
     priv = Ed25519PrivateKey.generate()
     pub = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
@@ -78,7 +79,7 @@ def _write_agent_manifest_files(
             "system_prompt": {"hash": "sha256:" + "a" * 64},
             "model_identity": {"version": "claude-3", "deployment_type": "api"},
             "policy_bundle": {"hash": policy_hash, "policy_language": "cedar"},
-            "tool_manifest": {"catalog_hash": catalog_hash, "tools": []},
+            "tool_manifest": {"catalog_hash": catalog_hash, "tools": tools if tools is not None else []},
         },
         "delegation_chain": [],
     }
@@ -102,6 +103,25 @@ def _write_agent_manifest_files(
         })
     )
     return manifest_path, key_path
+
+
+def _bridge_test_files(tmp_path: Path, manifest_path: Path, policy_hash: str, runtime_hash: str):
+    from cmcp_runtime.catalog.authority_bridge import sign_bridge
+    manifest = json.loads(manifest_path.read_text())
+    private = Ed25519PrivateKey.generate()
+    public = private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    key_id = hashlib.sha256(public).hexdigest()
+    payload = dict(version=1, manifest_id=manifest["manifest_id"],
+        manifest_digest="sha256:" + hashlib.sha256(signing_pre_image(manifest)).hexdigest(),
+        agent_id=manifest["agent_id"], policy_hash=policy_hash,
+        runtime_catalog_hash=runtime_hash,
+        manifest_catalog_root=manifest["artifacts"]["tool_manifest"]["catalog_hash"],
+        not_before="2026-01-01T00:00:00Z", expires_at="2099-01-01T00:00:00Z", key_id=key_id)
+    receipt_path = tmp_path / "bridge-receipt.json"
+    trust_path = tmp_path / "bridge-public-key.json"
+    receipt_path.write_text(json.dumps(sign_bridge(payload, private)))
+    trust_path.write_text(json.dumps({"algorithm":"Ed25519", "key_id":key_id, "public_key_base64url":_b64url(public)}))
+    return receipt_path, trust_path
 
 
 @pytest.fixture
@@ -240,18 +260,24 @@ def test_startup_binds_configured_agent_manifest(complete_setup):
     config_path = Path(complete_setup)
     tmp_path = config_path.parent
     policy_hash = load_policy_bundle(str(tmp_path / "policy")).bundle_hash
-    catalog_hash = load_catalog(str(tmp_path / "catalog.json")).catalog_hash
+    from cmcp_runtime.catalog.authority_bridge import catalog_merkle_root, catalog_merkle_tools
+    catalog = load_catalog(str(tmp_path / "catalog.json"))
+    catalog_hash = catalog.catalog_hash
     manifest_path, key_path = _write_agent_manifest_files(
         tmp_path,
         policy_hash=policy_hash,
-        catalog_hash=catalog_hash,
+        catalog_hash=catalog_merkle_root(catalog),
+        tools=catalog_merkle_tools(catalog),
     )
+    bridge_path, bridge_key = _bridge_test_files(tmp_path, manifest_path, policy_hash, catalog_hash)
     config_path.write_text(
         config_path.read_text()
         + "\nagent_manifest:\n"
         + f"  path: {manifest_path}\n"
         + f"  trust_anchor_path: {key_path}\n"
         + f"  authenticated_subject: {AGENT_ID}\n"
+        + f"  catalog_bridge_path: {bridge_path}\n"
+        + f"  catalog_bridge_trust_anchor_path: {bridge_key}\n"
     )
 
     ctx = run_startup(str(config_path))
@@ -605,18 +631,24 @@ def _agent_manifest_config(complete_setup, extra: str = "") -> Path:
     config_path = Path(complete_setup)
     tmp_path = config_path.parent
     policy_hash = load_policy_bundle(str(tmp_path / "policy")).bundle_hash
-    catalog_hash = load_catalog(str(tmp_path / "catalog.json")).catalog_hash
+    from cmcp_runtime.catalog.authority_bridge import catalog_merkle_root, catalog_merkle_tools
+    catalog = load_catalog(str(tmp_path / "catalog.json"))
+    catalog_hash = catalog.catalog_hash
     manifest_path, key_path = _write_agent_manifest_files(
         tmp_path,
         policy_hash=policy_hash,
-        catalog_hash=catalog_hash,
+        catalog_hash=catalog_merkle_root(catalog),
+        tools=catalog_merkle_tools(catalog),
     )
+    bridge_path, bridge_key = _bridge_test_files(tmp_path, manifest_path, policy_hash, catalog_hash)
     config_path.write_text(
         config_path.read_text()
         + "\nagent_manifest:\n"
         + f"  path: {manifest_path}\n"
         + f"  trust_anchor_path: {key_path}\n"
         + f"  authenticated_subject: {AGENT_ID}\n"
+        + f"  catalog_bridge_path: {bridge_path}\n"
+        + f"  catalog_bridge_trust_anchor_path: {bridge_key}\n"
         + extra
     )
     return config_path

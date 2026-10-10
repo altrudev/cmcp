@@ -77,3 +77,26 @@ def verify_bridge(receipt: dict[str, Any], trusted_keys: dict[str, bytes], *,
         Ed25519PublicKey.from_public_bytes(key).verify(raw, _message(p))
     except (ValueError, InvalidSignature, TypeError) as exc:
         raise ConfigError("Catalog bridge signature invalid") from exc
+
+
+def catalog_merkle_tools(catalog: Any) -> list[dict[str, str]]:
+    """Derive the SDK root from validated, immutable approved tool definitions."""
+    from agent_manifest import ToolEntry
+    from agent_manifest._merkle import build_catalog_tree
+    from agent_manifest._types import HashValue
+
+    tools = []
+    for name, entry in sorted(catalog.entries.items()):
+        definition = entry.approved_definition
+        schema = {"input_schema": definition.input_schema, "output_schema": definition.output_schema}
+        schema_hash = 'sha256:' + hashlib.sha256(_canonical(schema)).hexdigest()
+        description_hash = 'sha256:' + hashlib.sha256(definition.description.encode('utf-8')).hexdigest()
+        tools.append({"tool_id": name, "schema_hash": schema_hash, "description_hash": description_hash})
+    return tools
+
+
+def catalog_merkle_root(catalog: Any) -> str:
+    from agent_manifest.models import ToolEntry
+    from agent_manifest._merkle import build_catalog_tree
+    from agent_manifest._types import HashValue
+    return build_catalog_tree([ToolEntry.model_construct(tool_id=t["tool_id"], schema_hash=HashValue(t["schema_hash"]), description_hash=HashValue(t["description_hash"])) for t in catalog_merkle_tools(catalog)])
