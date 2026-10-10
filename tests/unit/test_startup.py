@@ -683,3 +683,58 @@ def test_startup_fails_closed_on_unreadable_revocation_list(complete_setup):
     with pytest.raises(SystemExit) as exc_info:
         run_startup(str(config_path))
     assert exc_info.value.code == 1
+
+
+@pytest.mark.parametrize('attack', [
+    'missing_receipt', 'receipt_corrupt', 'receipt_replayed', 'receipt_expired',
+    'receipt_untrusted', 'catalog_schema_changed', 'catalog_description_changed',
+    'manifest_tool_changed', 'manifest_root_changed', 'policy_changed',
+])
+def test_catalog_bridge_startup_attack_fails_closed(complete_setup, attack, caplog):
+    """An independently measured, signed startup binding must not be bypassable."""
+    from cmcp_runtime.catalog.authority_bridge import sign_bridge
+    config_path = _agent_manifest_config(complete_setup)
+    base = config_path.parent
+    receipt_path = base / 'bridge-receipt.json'
+    manifest_path = base / 'agent-manifest.json'
+    catalog_path = base / 'catalog.json'
+    receipt = json.loads(receipt_path.read_text())
+    if attack == 'missing_receipt':
+        receipt_path.unlink()
+    elif attack == 'receipt_corrupt':
+        receipt['signature'] = 'A' * 86
+        receipt_path.write_text(json.dumps(receipt))
+    elif attack == 'receipt_replayed':
+        receipt['payload']['manifest_id'] = 'another-manifest'
+        receipt_path.write_text(json.dumps(receipt))
+    elif attack == 'receipt_expired':
+        receipt['payload']['expires_at'] = '2026-01-02T00:00:00Z'
+        receipt_path.write_text(json.dumps(receipt))
+    elif attack == 'receipt_untrusted':
+        (base / 'bridge-public-key.json').write_text(json.dumps({
+            'algorithm':'Ed25519', 'key_id': 'a'*64,
+            'public_key_base64url': _b64url(b'0'*32),
+        }))
+    elif attack in ('catalog_schema_changed', 'catalog_description_changed'):
+        catalog = json.loads(catalog_path.read_text())
+        if attack == 'catalog_schema_changed':
+            catalog[0]['approved_definition']['input_schema'] = {'type':'object', 'properties':{'injected':{'type':'string'}}}
+        else:
+            catalog[0]['approved_definition']['description'] = 'modified description'
+        catalog_path.write_text(json.dumps(catalog))
+    elif attack in ('manifest_tool_changed', 'manifest_root_changed'):
+        manifest = json.loads(manifest_path.read_text())
+        if attack == 'manifest_tool_changed':
+            manifest['artifacts']['tool_manifest']['tools'][0]['tool_id'] = 'other.tool'
+        else:
+            manifest['artifacts']['tool_manifest']['catalog_hash'] = 'sha256:' + '0'*64
+        manifest_path.write_text(json.dumps(manifest))
+    elif attack == 'policy_changed':
+        (base / 'policy' / 'allow.cedar').write_text(CEDAR_POLICY + '\n// changed\n')
+    with caplog.at_level('CRITICAL', logger='cmcp_runtime.startup'):
+        with pytest.raises(SystemExit) as exc:
+            run_startup(str(config_path))
+    assert exc.value.code == 1
+    assert any('AGENT_MANIFEST_BINDING_FAILED' in record.getMessage() or
+               'POLICY_' in record.getMessage() or 'CATALOG_' in record.getMessage() or 'CONFIG_ERROR' in record.getMessage()
+               for record in caplog.records)
