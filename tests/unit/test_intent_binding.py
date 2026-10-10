@@ -31,7 +31,7 @@ from cmcp_runtime.errors import ConfigError
 
 AGENT_ID = "spiffe://factory.example/agent/reconciler/prod"
 POLICY_HASH = "sha256:" + "ab" * 32
-CATALOG_HASH = "sha256:" + "cd" * 32
+CATALOG_HASH = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 STATEMENT = "Reconcile supplier invoices against the general ledger."
 
 
