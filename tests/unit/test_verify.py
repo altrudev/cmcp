@@ -37,7 +37,7 @@ from cmcp_verify.verify import (
 )
 
 POLICY_HASH = "sha256:" + "a" * 64
-CATALOG_HASH = "sha256:" + "b" * 64
+CATALOG_HASH = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # SDK SHA-256 of empty tool catalog
 AGENT_ID = "spiffe://factory.example/agent/material-movement/dev"
 MANIFEST_ID = "0197739a-8c00-7000-8000-000000000001"
 
